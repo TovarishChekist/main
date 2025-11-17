@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система управления Детским и Молодёжным Общественным Советом</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Детский и Молодёжный Общественный Совет</h1>
+            <p class="subtitle">при Уполномоченном по правам ребёнка в Амурской области</p>
+        </header>
+
+        <nav class="main-nav">
+            <button class="nav-btn active" data-section="dashboard">Панель управления</button>
+            <button class="nav-btn" data-section="members">Члены совета</button>
+            <button class="nav-btn" data-section="events">Мероприятия</button>
+            <button class="nav-btn" data-section="projects">Проекты</button>
+            <button class="nav-btn" data-section="documents">Документы</button>
+            <button class="nav-btn" data-section="reports">Отчеты</button>
+        </nav>
+
+        <!-- Панель управления -->
+        <section id="dashboard" class="content-section active">
+            <h2>Панель управления</h2>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Членов совета</h3>
+                    <p class="stat-number" id="stat-members">0</p>
+                    <p class="stat-label">Активных</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Мероприятий</h3>
+                    <p class="stat-number" id="stat-events">0</p>
+                    <p class="stat-label">Всего</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Проектов</h3>
+                    <p class="stat-number" id="stat-projects">0</p>
+                    <p class="stat-label">Активных</p>
+                </div>
+                <div class="stat-card">
+                    <h3>Бюджет</h3>
+                    <p class="stat-number" id="stat-budget">0 ₽</p>
+                    <p class="stat-label">Общий</p>
+                </div>
+            </div>
+
+            <div class="dashboard-sections">
+                <div class="dashboard-section">
+                    <h3>Предстоящие мероприятия</h3>
+                    <div id="upcoming-events" class="list-container">
+                        <p class="empty-message">Нет предстоящих мероприятий</p>
+                    </div>
+                </div>
+
+                <div class="dashboard-section">
+                    <h3>Активные проекты</h3>
+                    <div id="active-projects" class="list-container">
+                        <p class="empty-message">Нет активных проектов</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Члены совета -->
+        <section id="members" class="content-section">
+            <div class="section-header">
+                <h2>Члены совета</h2>
+                <button class="btn-primary" onclick="showMemberForm()">Добавить члена</button>
+            </div>
+
+            <div class="filters">
+                <select id="member-status-filter" onchange="loadMembers()">
+                    <option value="">Все статусы</option>
+                    <option value="active">Активные</option>
+                    <option value="inactive">Неактивные</option>
+                </select>
+                <select id="member-council-filter" onchange="loadMembers()">
+                    <option value="">Все советы</option>
+                    <option value="Детский">Детский совет</option>
+                    <option value="Молодёжный">Молодёжный совет</option>
+                </select>
+            </div>
+
+            <div id="members-list" class="table-container"></div>
+            <div id="member-form" class="modal" style="display:none;">
+                <div class="modal-content">
+                    <span class="close" onclick="closeMemberForm()">&times;</span>
+                    <h3>Добавить члена совета</h3>
+                    <form id="member-form-data">
+                        <input type="text" id="member-last-name" placeholder="Фамилия" required>
+                        <input type="text" id="member-first-name" placeholder="Имя" required>
+                        <input type="text" id="member-middle-name" placeholder="Отчество">
+                        <input type="date" id="member-birth-date" required>
+                        <input type="email" id="member-email" placeholder="Email">
+                        <input type="tel" id="member-phone" placeholder="Телефон">
+                        <select id="member-council-type">
+                            <option value="Детский">Детский совет</option>
+                            <option value="Молодёжный">Молодёжный совет</option>
+                        </select>
+                        <input type="text" id="member-position" placeholder="Должность">
+                        <textarea id="member-interests" placeholder="Интересы"></textarea>
+                        <button type="submit" class="btn-primary">Сохранить</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- Мероприятия -->
+        <section id="events" class="content-section">
+            <div class="section-header">
+                <h2>Мероприятия</h2>
+                <button class="btn-primary" onclick="showEventForm()">Создать мероприятие</button>
+            </div>
+
+            <div class="filters">
+                <select id="event-status-filter" onchange="loadEvents()">
+                    <option value="">Все статусы</option>
+                    <option value="planned">Запланировано</option>
+                    <option value="ongoing">Проводится</option>
+                    <option value="completed">Завершено</option>
+                </select>
+                <label>
+                    <input type="checkbox" id="event-upcoming-filter" onchange="loadEvents()">
+                    Только предстоящие
+                </label>
+            </div>
+
+            <div id="events-list" class="table-container"></div>
+        </section>
+
+        <!-- Проекты -->
+        <section id="projects" class="content-section">
+            <div class="section-header">
+                <h2>Проекты</h2>
+                <button class="btn-primary" onclick="showProjectForm()">Создать проект</button>
+            </div>
+
+            <div class="filters">
+                <select id="project-status-filter" onchange="loadProjects()">
+                    <option value="">Все статусы</option>
+                    <option value="planning">Планирование</option>
+                    <option value="active">Активный</option>
+                    <option value="completed">Завершён</option>
+                </select>
+            </div>
+
+            <div id="projects-list" class="table-container"></div>
+        </section>
+
+        <!-- Документы -->
+        <section id="documents" class="content-section">
+            <div class="section-header">
+                <h2>Документы</h2>
+                <button class="btn-primary" onclick="showDocumentForm()">Добавить документ</button>
+            </div>
+
+            <div id="documents-list" class="table-container"></div>
+        </section>
+
+        <!-- Отчеты -->
+        <section id="reports" class="content-section">
+            <div class="section-header">
+                <h2>Отчеты</h2>
+                <button class="btn-primary" onclick="showReportForm()">Создать отчет</button>
+            </div>
+
+            <div id="reports-list" class="table-container"></div>
+        </section>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

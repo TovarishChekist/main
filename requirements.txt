@@ -1,0 +1,14 @@
+# Flask и расширения
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-CORS==4.0.0
+
+# База данных
+SQLAlchemy==2.0.23
+
+# Утилиты
+python-dotenv==1.0.0
+Werkzeug==3.0.1
+
+# Для production
+gunicorn==21.2.0
