@@ -42,6 +42,14 @@ def setup_bot():
 
     logger.info("Конфигурация успешно загружена")
 
+    # Инициализация базы данных
+    try:
+        db = config.setup_database()
+        logger.info("База данных успешно инициализирована")
+    except Exception as e:
+        logger.critical(f"Ошибка при инициализации базы данных: {e}")
+        sys.exit(1)
+
     # Настройка таймаутов API
     apihelper.CONNECT_TIMEOUT = config.CONNECT_TIMEOUT
     apihelper.READ_TIMEOUT = config.READ_TIMEOUT
@@ -67,7 +75,7 @@ def setup_bot():
 
     # Регистрация обработчиков
     try:
-        handlers = BotHandlers(bot)
+        handlers = BotHandlers(bot, db)
         handlers.register_handlers()
         logger.info("Обработчики зарегистрированы успешно")
     except Exception as e:

@@ -93,6 +93,15 @@ class Config:
         logging.getLogger('urllib3').setLevel(logging.WARNING)
         logging.getLogger('telebot').setLevel(logging.INFO)
 
+    @classmethod
+    def setup_database(cls):
+        """Инициализация базы данных"""
+        from .database import Database
+        db = Database(cls.DATABASE_PATH)
+        logger = logging.getLogger(__name__)
+        logger.info(f"База данных инициализирована: {cls.DATABASE_PATH}")
+        return db
+
 
 # Создаем экземпляр конфигурации
 config = Config()

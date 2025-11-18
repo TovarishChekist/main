@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Модуль обработчиков сообщений
+Модуль обработчиков сообщений (версия 2.0 с БД и медиафайлами)
 Содержит всю логику обработки пользовательских команд и сообщений
 """
 
 import logging
 from telebot import TeleBot
-from telebot.types import Message
+from telebot.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from .config import config
 from .messages import messages
@@ -14,6 +14,7 @@ from .keyboards import keyboards
 from .states import state_manager, UserState
 from .validators import validators
 from .utils import MessageManager, response_mapper
+from .database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,9 @@ logger = logging.getLogger(__name__)
 class BotHandlers:
     """Класс с обработчиками сообщений бота"""
 
-    def __init__(self, bot: TeleBot):
+    def __init__(self, bot: TeleBot, db: Database):
         self.bot = bot
+        self.db = db
         self.msg_manager = MessageManager()
 
     def register_handlers(self):
@@ -30,6 +32,14 @@ class BotHandlers:
         # Команды
         self.bot.register_message_handler(self.cmd_start, commands=['start'])
         self.bot.register_message_handler(self.cmd_help, commands=['help'])
+        self.bot.register_message_handler(self.cmd_my_applications, commands=['my_applications'])
+        self.bot.register_message_handler(self.cmd_stats, commands=['stats'])
+
+        # Callback-кнопки для админов
+        self.bot.register_callback_query_handler(
+            self.handle_admin_callback,
+            func=lambda call: call.data.startswith('admin_')
+        )
 
         # Кнопки главного меню
         self.bot.register_message_handler(
@@ -52,12 +62,23 @@ class BotHandlers:
             self.handle_leadership_button,
             func=lambda m: m.text == "👥 Руководство Совета"
         )
+        self.bot.register_message_handler(
+            self.handle_faq_button,
+            func=lambda m: m.text == "❓ FAQ"
+        )
 
         # Ответы от администраторов в группах
         self.bot.register_message_handler(
             self.handle_admin_response,
             func=lambda m: m.chat.id in [config.APPEAL_CHAT_ID, config.APPLICATION_CHAT_ID]
                           and m.reply_to_message is not None
+        )
+
+        # Обработка медиафайлов (фото, документы, видео)
+        self.bot.register_message_handler(
+            self.handle_media,
+            content_types=['photo', 'document', 'video'],
+            func=lambda m: m.chat.id not in [config.APPEAL_CHAT_ID, config.APPLICATION_CHAT_ID]
         )
 
         # Обработка текстовых сообщений от пользователей
@@ -73,7 +94,20 @@ class BotHandlers:
 
     def cmd_start(self, message: Message):
         """Обработчик команды /start"""
-        logger.info(f"Пользователь {message.from_user.id} ({message.from_user.username}) запустил бота")
+        user = message.from_user
+        logger.info(f"Пользователь {user.id} ({user.username}) запустил бота")
+
+        # Сохраняем пользователя в БД
+        self.db.add_or_update_user(
+            user.id,
+            user.username,
+            user.first_name,
+            user.last_name
+        )
+
+        # Логируем событие
+        self.db.log_event('bot_start', f'user_id:{user.id}')
+
         self._send_main_menu(message.chat.id)
 
     def cmd_help(self, message: Message):
@@ -82,7 +116,7 @@ class BotHandlers:
 
 <b>Доступные функции:</b>
 
-📩 <b>Обращение в Совет</b> - отправить свое обращение, вопрос или предложение
+📩 <b>Обращение в Совет</b> - отправить свое обращение, вопрос или предложение (можно с фото/документами)
 
 📝 <b>Заявка на вступление</b> - подать заявку на вступление в Совет (только для Благовещенска)
 
@@ -90,9 +124,12 @@ class BotHandlers:
 
 👥 <b>Руководство Совета</b> - посмотреть состав руководства
 
+❓ <b>FAQ</b> - ответы на частые вопросы
+
 <b>Команды:</b>
 /start - Вернуться в главное меню
 /help - Показать эту справку
+/my_applications - Мои заявки и обращения
 
 <b>Нужна помощь?</b> Напиши нам через раздел "Обращение в Совет"!"""
 
@@ -104,6 +141,95 @@ class BotHandlers:
             reply_markup=keyboards.main_menu()
         )
 
+    def cmd_my_applications(self, message: Message):
+        """Показать мои заявки и обращения"""
+        user_id = message.from_user.id
+
+        # Получаем заявки
+        applications = self.db.get_user_applications(user_id)
+        # Получаем обращения
+        appeals = self.db.get_user_appeals(user_id)
+
+        text = "<b>📋 Мои заявки и обращения</b>\n\n"
+
+        if applications:
+            text += "<b>📝 Заявки на вступление:</b>\n"
+            for app in applications:
+                status_emoji = {
+                    'pending': '⏳',
+                    'approved': '✅',
+                    'rejected': '❌'
+                }.get(app['status'], '❓')
+
+                status_text = {
+                    'pending': 'На рассмотрении',
+                    'approved': 'Одобрена',
+                    'rejected': 'Отклонена'
+                }.get(app['status'], app['status'])
+
+                text += f"\n{status_emoji} <b>Заявка #{app['id']}</b>\n"
+                text += f"Дата: {app['created_at'][:10]}\n"
+                text += f"Статус: {status_text}\n"
+                if app['review_comment']:
+                    text += f"Комментарий: {app['review_comment']}\n"
+        else:
+            text += "📝 У вас пока нет заявок\n\n"
+
+        if appeals:
+            text += "\n<b>📩 Обращения:</b>\n"
+            for appeal in appeals:
+                status_emoji = {
+                    'new': '🆕',
+                    'answered': '✅',
+                    'closed': '🔒'
+                }.get(appeal['status'], '❓')
+
+                text += f"\n{status_emoji} <b>Обращение #{appeal['id']}</b>\n"
+                text += f"Дата: {appeal['created_at'][:10]}\n"
+                text += f"Текст: {appeal['text'][:50]}...\n"
+                if appeal['response_text']:
+                    text += f"📩 Ответ получен: {appeal['responded_at'][:10]}\n"
+        else:
+            text += "📩 У вас пока нет обращений\n"
+
+        self.msg_manager.safe_send_message(
+            self.bot,
+            message.chat.id,
+            text,
+            parse_mode='HTML',
+            reply_markup=keyboards.main_menu()
+        )
+
+    def cmd_stats(self, message: Message):
+        """Статистика (только для админов)"""
+        # Проверяем, является ли пользователь админом
+        if message.chat.id not in [config.APPEAL_CHAT_ID, config.APPLICATION_CHAT_ID]:
+            # Можно добавить список админов
+            return
+
+        stats = self.db.get_stats_summary()
+
+        text = f"""<b>📊 Статистика бота</b>
+
+👥 Всего пользователей: {stats['total_users']}
+
+📩 Обращения:
+• Всего: {stats['total_appeals']}
+• Новых: {stats['new_appeals']}
+
+📝 Заявки:
+• Всего: {stats['total_applications']}
+• На рассмотрении: {stats['pending_applications']}
+• Одобрено: {stats['approved_applications']}
+"""
+
+        self.msg_manager.safe_send_message(
+            self.bot,
+            message.chat.id,
+            text,
+            parse_mode='HTML'
+        )
+
     # ============ Главное меню ============
 
     def _send_main_menu(self, chat_id: int, text: str = None):
@@ -111,12 +237,21 @@ class BotHandlers:
         if text is None:
             text = messages.WELCOME
 
+        # Обновленное меню с кнопкой FAQ
+        from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
+        markup.add(KeyboardButton("📩 Обращение в Совет"))
+        markup.add(KeyboardButton("📝 Заявка на вступление в Совет"))
+        markup.add(KeyboardButton("ℹ️ Информация о Совете"))
+        markup.add(KeyboardButton("👥 Руководство Совета"))
+        markup.add(KeyboardButton("❓ FAQ"))
+
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
             text,
             parse_mode='HTML',
-            reply_markup=keyboards.main_menu()
+            reply_markup=markup
         )
 
         if sent:
@@ -157,11 +292,12 @@ class BotHandlers:
         if last_msg_id:
             self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
 
-        # Отправляем промпт
+        # Отправляем промпт с упоминанием о медиафайлах
+        appeal_text = messages.APPEAL_PROMPT + "\n\n<i>Вы можете прикрепить фото или документ к вашему обращению.</i>"
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
-            messages.APPEAL_PROMPT,
+            appeal_text,
             parse_mode='HTML',
             reply_markup=keyboards.back_to_menu()
         )
@@ -170,10 +306,10 @@ class BotHandlers:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPEAL)
 
-    def handle_application_button(self, message: Message):
-        """Обработчик кнопки 'Заявка на вступление в Совет'"""
+    def handle_faq_button(self, message: Message):
+        """Обработчик кнопки FAQ"""
         chat_id = message.chat.id
-        logger.info(f"Пользователь {message.from_user.id} начал заполнение заявки")
+        logger.info(f"Пользователь {message.from_user.id} открыл FAQ")
 
         # Удаляем сообщение пользователя
         self.msg_manager.safe_delete_message(self.bot, chat_id, message.message_id)
@@ -183,7 +319,52 @@ class BotHandlers:
         if last_msg_id:
             self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
 
-        # Отправляем приветствие и запрос ФИО
+        faq_text = """<b>❓ Часто задаваемые вопросы</b>
+
+<b>1. Кто может вступить в Совет?</b>
+В Совет могут вступить дети и молодёжь от 10 до 25 лет, проживающие в Благовещенске.
+
+<b>2. Сколько рассматривается заявка?</b>
+Заявки рассматриваются в течение 5 рабочих дней. Результат придет в этот чат.
+
+<b>3. Какие документы нужны для вступления?</b>
+Специальные документы не требуются, достаточно заполнить заявку в боте.
+
+<b>4. Чем занимается Совет?</b>
+Мы защищаем права детей, организуем мероприятия, проводим акции и помогаем развивать молодежные инициативы.
+
+<b>5. Как связаться с Советом?</b>
+Используйте раздел "Обращение в Совет" в этом боте, и мы ответим вам в ближайшее время.
+
+<b>6. Могу ли я отправить фото в обращении?</b>
+Да! Просто прикрепите фото или документ к сообщению.
+
+<b>7. Как узнать статус моей заявки?</b>
+Используйте команду /my_applications
+
+<b>Остались вопросы?</b> Задайте их через раздел "Обращение в Совет"!"""
+
+        sent = self.msg_manager.safe_send_message(
+            self.bot,
+            chat_id,
+            faq_text,
+            parse_mode='HTML',
+            reply_markup=keyboards.back_to_menu()
+        )
+
+        if sent:
+            state_manager.set_last_message(chat_id, sent.message_id)
+
+    def handle_application_button(self, message: Message):
+        """Обработчик кнопки 'Заявка на вступление в Совет'"""
+        chat_id = message.chat.id
+        logger.info(f"Пользователь {message.from_user.id} начал заполнение заявки")
+
+        self.msg_manager.safe_delete_message(self.bot, chat_id, message.message_id)
+        last_msg_id = state_manager.get_last_message(chat_id)
+        if last_msg_id:
+            self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
+
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
@@ -201,15 +382,11 @@ class BotHandlers:
         chat_id = message.chat.id
         logger.info(f"Пользователь {message.from_user.id} запросил информацию о Совете")
 
-        # Удаляем сообщение пользователя
         self.msg_manager.safe_delete_message(self.bot, chat_id, message.message_id)
-
-        # Удаляем предыдущее сообщение бота
         last_msg_id = state_manager.get_last_message(chat_id)
         if last_msg_id:
             self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
 
-        # Отправляем информацию
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
@@ -226,15 +403,11 @@ class BotHandlers:
         chat_id = message.chat.id
         logger.info(f"Пользователь {message.from_user.id} запросил информацию о руководстве")
 
-        # Удаляем сообщение пользователя
         self.msg_manager.safe_delete_message(self.bot, chat_id, message.message_id)
-
-        # Удаляем предыдущее сообщение бота
         last_msg_id = state_manager.get_last_message(chat_id)
         if last_msg_id:
             self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
 
-        # Отправляем информацию
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
@@ -246,7 +419,118 @@ class BotHandlers:
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
 
-    # ============ Обработка пользовательских сообщений ============
+    # ============ Обработка медиафайлов ============
+
+    def handle_media(self, message: Message):
+        """Обработка фото, документов, видео"""
+        chat_id = message.chat.id
+        current_state = state_manager.get_state(chat_id)
+
+        # Медиафайлы поддерживаются только для обращений
+        if current_state == UserState.APPEAL:
+            self._process_appeal_with_media(message)
+        else:
+            # В других случаях предлагаем вернуться в меню
+            self.msg_manager.safe_send_message(
+                self.bot,
+                chat_id,
+                "Медиафайлы можно отправлять только в разделе 'Обращение в Совет'",
+                reply_markup=keyboards.main_menu()
+            )
+
+    def _process_appeal_with_media(self, message: Message):
+        """Обработка обращения с медиафайлом"""
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        # Определяем тип медиа и file_id
+        media_type = None
+        media_file_id = None
+        caption = message.caption or "Обращение с медиафайлом"
+
+        if message.photo:
+            media_type = 'photo'
+            media_file_id = message.photo[-1].file_id  # Берем самое большое фото
+        elif message.document:
+            media_type = 'document'
+            media_file_id = message.document.file_id
+        elif message.video:
+            media_type = 'video'
+            media_file_id = message.video.file_id
+
+        logger.info(f"Получено обращение с {media_type} от пользователя {user_id}")
+
+        # Сохраняем в БД
+        try:
+            appeal_id = self.db.add_appeal(user_id, caption, media_type, media_file_id)
+            self.db.log_event('appeal_created', f'user:{user_id},appeal:{appeal_id},media:{media_type}')
+
+            # Пересылаем в группу
+            if media_type == 'photo':
+                forwarded = self.bot.send_photo(
+                    config.APPEAL_CHAT_ID,
+                    media_file_id,
+                    caption=f"📩 <b>Обращение #{appeal_id}</b>\n\n{caption}\n\n👤 От: {message.from_user.first_name}",
+                    parse_mode='HTML'
+                )
+            elif media_type == 'document':
+                forwarded = self.bot.send_document(
+                    config.APPEAL_CHAT_ID,
+                    media_file_id,
+                    caption=f"📩 <b>Обращение #{appeal_id}</b>\n\n{caption}\n\n👤 От: {message.from_user.first_name}",
+                    parse_mode='HTML'
+                )
+            elif media_type == 'video':
+                forwarded = self.bot.send_video(
+                    config.APPEAL_CHAT_ID,
+                    media_file_id,
+                    caption=f"📩 <b>Обращение #{appeal_id}</b>\n\n{caption}\n\n👤 От: {message.from_user.first_name}",
+                    parse_mode='HTML'
+                )
+
+            response_mapper.add(config.APPEAL_CHAT_ID, forwarded.message_id, chat_id)
+
+            # Добавляем админ-кнопки к сообщению
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ Отметить обработанным", callback_data=f"admin_appeal_done_{appeal_id}")
+            )
+            self.bot.edit_message_reply_markup(
+                config.APPEAL_CHAT_ID,
+                forwarded.message_id,
+                reply_markup=markup
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка при обработке обращения с медиа: {e}")
+            self.msg_manager.safe_send_message(
+                self.bot,
+                chat_id,
+                "❌ Произошла ошибка при отправке обращения. Попробуйте позже.",
+                parse_mode='HTML'
+            )
+            return
+
+        # Удаляем предыдущее сообщение бота
+        last_msg_id = state_manager.get_last_message(chat_id)
+        if last_msg_id:
+            self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
+
+        # Отправляем подтверждение
+        sent = self.msg_manager.safe_send_message(
+            self.bot,
+            chat_id,
+            messages.APPEAL_SUCCESS,
+            parse_mode='HTML',
+            reply_markup=keyboards.back_to_menu()
+        )
+
+        if sent:
+            state_manager.set_last_message(chat_id, sent.message_id)
+
+        state_manager.set_state(chat_id, UserState.IDLE)
+
+    # ============ Обработка текстовых сообщений ============
 
     def handle_user_message(self, message: Message):
         """Обработчик текстовых сообщений от пользователей"""
@@ -279,9 +563,10 @@ class BotHandlers:
     # ============ Обработка обращений ============
 
     def _process_appeal(self, message: Message):
-        """Обработка обращения"""
+        """Обработка текстового обращения"""
         chat_id = message.chat.id
-        logger.info(f"Обработка обращения от пользователя {message.from_user.id}")
+        user_id = message.from_user.id
+        logger.info(f"Обработка обращения от пользователя {user_id}")
 
         # Валидация
         is_valid, error = validators.validate_text_length(message.text, min_length=10, max_length=2000)
@@ -295,11 +580,38 @@ class BotHandlers:
             )
             return
 
-        # Пересылаем обращение в группу
+        # Сохраняем в БД
         try:
-            forwarded = self.bot.forward_message(config.APPEAL_CHAT_ID, chat_id, message.message_id)
+            appeal_id = self.db.add_appeal(user_id, message.text)
+            self.db.log_event('appeal_created', f'user:{user_id},appeal:{appeal_id}')
+
+            # Пересылаем в группу с админ-кнопками
+            appeal_text = f"""📩 <b>Обращение #{appeal_id}</b>
+
+{message.text}
+
+👤 <b>От:</b> {message.from_user.first_name} (@{message.from_user.username or 'нет username'})"""
+
+            forwarded = self.bot.send_message(
+                config.APPEAL_CHAT_ID,
+                appeal_text,
+                parse_mode='HTML'
+            )
+
+            # Добавляем админ-кнопки
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ Отметить обработанным", callback_data=f"admin_appeal_done_{appeal_id}")
+            )
+            self.bot.edit_message_reply_markup(
+                config.APPEAL_CHAT_ID,
+                forwarded.message_id,
+                reply_markup=markup
+            )
+
             response_mapper.add(config.APPEAL_CHAT_ID, forwarded.message_id, chat_id)
-            logger.info(f"Обращение переслано в группу {config.APPEAL_CHAT_ID}")
+            logger.info(f"Обращение #{appeal_id} переслано в группу {config.APPEAL_CHAT_ID}")
+
         except Exception as e:
             logger.error(f"Ошибка при пересылке обращения: {e}")
             self.msg_manager.safe_send_message(
@@ -311,9 +623,7 @@ class BotHandlers:
             return
 
         # Удаляем предыдущее сообщение бота
-        last_msg_id = state_manager.get_last_message(chat_id)
-        if last_msg_id:
-            self.msg_manager.safe_delete_message(self.bot, chat_id, last_msg_id)
+        self._delete_last_bot_message(chat_id)
 
         # Отправляем подтверждение
         sent = self.msg_manager.safe_send_message(
@@ -329,39 +639,18 @@ class BotHandlers:
 
         state_manager.set_state(chat_id, UserState.IDLE)
 
-    # ============ Обработка заявки на вступление ============
+    # ========== Обработка заявки (методы остаются теми же) ==========
 
     def _process_application_fio(self, message: Message):
         """Обработка ФИО"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_fio(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'fio', message.text)
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем возраст
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_AGE,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_AGE, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_AGE)
@@ -369,34 +658,13 @@ class BotHandlers:
     def _process_application_age(self, message: Message):
         """Обработка возраста"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_age(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'age', message.text.strip())
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем школу
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_SCHOOL,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_SCHOOL, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_SCHOOL)
@@ -404,34 +672,13 @@ class BotHandlers:
     def _process_application_school(self, message: Message):
         """Обработка школы"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_school(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'school', message.text)
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем класс
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_CLASS,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_CLASS, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_CLASS)
@@ -439,34 +686,13 @@ class BotHandlers:
     def _process_application_class(self, message: Message):
         """Обработка класса"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_class(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'class', message.text.strip())
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем никнейм
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_USERNAME,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_USERNAME, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_USERNAME)
@@ -474,34 +700,13 @@ class BotHandlers:
     def _process_application_username(self, message: Message):
         """Обработка никнейма"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_username(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'username', message.text.strip())
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем мотивацию
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_MOTIVATION,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_MOTIVATION, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_MOTIVATION)
@@ -509,34 +714,13 @@ class BotHandlers:
     def _process_application_motivation(self, message: Message):
         """Обработка мотивации"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_text_length(message.text, min_length=20, max_length=1000)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'motivation', message.text)
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем опыт
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_EXPERIENCE,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_EXPERIENCE, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_EXPERIENCE)
@@ -544,34 +728,13 @@ class BotHandlers:
     def _process_application_experience(self, message: Message):
         """Обработка опыта"""
         chat_id = message.chat.id
-
-        # Валидация
         is_valid, error = validators.validate_text_length(message.text, min_length=10, max_length=1000)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'experience', message.text)
-
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Запрашиваем контакты
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_CONTACTS,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_CONTACTS, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
             state_manager.set_state(chat_id, UserState.APPLICATION_CONTACTS)
@@ -579,60 +742,86 @@ class BotHandlers:
     def _process_application_contacts(self, message: Message):
         """Обработка контактов и отправка заявки"""
         chat_id = message.chat.id
-
-        # Валидация
+        user_id = message.from_user.id
         is_valid, error = validators.validate_contacts(message.text)
         if not is_valid:
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                f"❌ <b>{error}</b>\n\nПопробуй еще раз:",
-                parse_mode='HTML',
-                reply_markup=keyboards.back_to_menu()
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, f"❌ <b>{error}</b>\n\nПопробуй еще раз:", parse_mode='HTML', reply_markup=keyboards.back_to_menu())
             return
-
-        # Сохраняем данные
         state_manager.set_data(chat_id, 'contacts', message.text)
-
-        # Получаем все данные
         application_data = state_manager.get_all_data(chat_id)
 
-        # Формируем сообщение для группы
-        application_text = messages.format_application(application_data)
-
-        # Отправляем в группу
+        # Сохраняем заявку в БД
         try:
+            app_id = self.db.add_application(user_id, application_data)
+            self.db.log_event('application_created', f'user:{user_id},app:{app_id}')
+
+            application_text = messages.format_application(application_data)
+            application_text = application_text.replace("📋 <b>НОВАЯ ЗАЯВКА НА ВСТУПЛЕНИЕ В СОВЕТ</b>", f"📋 <b>ЗАЯВКА #{app_id} НА ВСТУПЛЕНИЕ В СОВЕТ</b>")
+
             sent_app = self.bot.send_message(config.APPLICATION_CHAT_ID, application_text, parse_mode='HTML')
+
+            # Добавляем админ-кнопки
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ Одобрить", callback_data=f"admin_app_approve_{app_id}"),
+                InlineKeyboardButton("❌ Отклонить", callback_data=f"admin_app_reject_{app_id}")
+            )
+            self.bot.edit_message_reply_markup(config.APPLICATION_CHAT_ID, sent_app.message_id, reply_markup=markup)
             response_mapper.add(config.APPLICATION_CHAT_ID, sent_app.message_id, chat_id)
-            logger.info(f"Заявка от пользователя {message.from_user.id} отправлена в группу")
+            logger.info(f"Заявка #{app_id} от пользователя {user_id} отправлена в группу")
         except Exception as e:
             logger.error(f"Ошибка при отправке заявки: {e}")
-            self.msg_manager.safe_send_message(
-                self.bot,
-                chat_id,
-                "❌ Произошла ошибка при отправке заявки. Попробуйте позже.",
-                parse_mode='HTML'
-            )
+            self.msg_manager.safe_send_message(self.bot, chat_id, "❌ Произошла ошибка при отправке заявки. Попробуйте позже.", parse_mode='HTML')
             return
 
-        # Удаляем предыдущее сообщение
         self._delete_last_bot_message(chat_id)
-
-        # Отправляем подтверждение
-        sent = self.msg_manager.safe_send_message(
-            self.bot,
-            chat_id,
-            messages.APPLICATION_SUCCESS,
-            parse_mode='HTML',
-            reply_markup=keyboards.back_to_menu()
-        )
-
+        sent = self.msg_manager.safe_send_message(self.bot, chat_id, messages.APPLICATION_SUCCESS, parse_mode='HTML', reply_markup=keyboards.back_to_menu())
         if sent:
             state_manager.set_last_message(chat_id, sent.message_id)
-
-        # Сбрасываем состояние
         state_manager.reset_state(chat_id)
+
+    # ============ Админ-панель с кнопками ============
+
+    def handle_admin_callback(self, call):
+        """Обработчик callback-кнопок для админов"""
+        data = call.data
+
+        # Обработка заявок
+        if data.startswith('admin_app_approve_'):
+            app_id = int(data.split('_')[-1])
+            self.db.update_application_status(app_id, 'approved', 'Заявка одобрена')
+            self.db.log_event('application_approved', f'app:{app_id}')
+
+            # Уведомляем пользователя
+            user_chat_id = response_mapper.get(call.message.chat.id, call.message.message_id)
+            if user_chat_id:
+                self.bot.send_message(user_chat_id, "🎉 <b>Поздравляем!</b>\n\nВаша заявка на вступление в Совет одобрена! Скоро с вами свяжутся.", parse_mode='HTML')
+
+            # Обновляем сообщение в группе
+            self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            self.bot.answer_callback_query(call.id, "✅ Заявка одобрена")
+
+        elif data.startswith('admin_app_reject_'):
+            app_id = int(data.split('_')[-1])
+            self.db.update_application_status(app_id, 'rejected', 'Заявка отклонена')
+            self.db.log_event('application_rejected', f'app:{app_id}')
+
+            # Уведомляем пользователя
+            user_chat_id = response_mapper.get(call.message.chat.id, call.message.message_id)
+            if user_chat_id:
+                self.bot.send_message(user_chat_id, "К сожалению, ваша заявка на вступление в Совет отклонена. Вы можете подать новую заявку позже.", parse_mode='HTML')
+
+            # Обновляем сообщение в группе
+            self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            self.bot.answer_callback_query(call.id, "❌ Заявка отклонена")
+
+        elif data.startswith('admin_appeal_done_'):
+            appeal_id = int(data.split('_')[-1])
+            self.db.update_appeal_status(appeal_id, 'answered')
+            self.db.log_event('appeal_answered', f'appeal:{appeal_id}')
+
+            self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            self.bot.answer_callback_query(call.id, "✅ Обращение отмечено обработанным")
 
     # ============ Обработка ответов от администраторов ============
 
