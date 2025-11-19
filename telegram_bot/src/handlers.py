@@ -49,6 +49,12 @@ class BotHandlers:
             func=lambda call: call.data.startswith('admin_')
         )
 
+        # Callback-кнопки для главного меню
+        self.bot.register_callback_query_handler(
+            self.handle_menu_callback,
+            func=lambda call: call.data.startswith('menu_') or call.data == 'back_to_menu'
+        )
+
         # Кнопки главного меню
         self.bot.register_message_handler(
             self.handle_back_to_menu,
@@ -616,21 +622,13 @@ class BotHandlers:
         if text is None:
             text = messages.WELCOME
 
-        # Обновленное меню с кнопкой FAQ
-        from telebot.types import ReplyKeyboardMarkup, KeyboardButton
-        markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-        markup.add(KeyboardButton("📩 Обращение в Совет"))
-        markup.add(KeyboardButton("📝 Заявка на вступление в Совет"))
-        markup.add(KeyboardButton("ℹ️ Информация о Совете"))
-        markup.add(KeyboardButton("👥 Руководство Совета"))
-        markup.add(KeyboardButton("❓ FAQ"))
-
+        # Используем inline-кнопки для более современного вида
         sent = self.msg_manager.safe_send_message(
             self.bot,
             chat_id,
             text,
             parse_mode='HTML',
-            reply_markup=markup
+            reply_markup=keyboards.main_menu_inline()
         )
 
         if sent:
@@ -655,6 +653,109 @@ class BotHandlers:
 
         # Отправляем меню
         self._send_main_menu(chat_id, messages.BACK_TO_MENU)
+
+    def handle_menu_callback(self, call):
+        """Обработчик inline-кнопок главного меню"""
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+
+        # Проверяем блокировку
+        if self.db.is_user_blocked(user_id):
+            block_info = self.db.get_block_info(user_id)
+            self.bot.answer_callback_query(call.id, "⛔ Доступ ограничен")
+            return
+
+        # Обрабатываем нажатие кнопки
+        if call.data == "menu_appeal":
+            self.bot.answer_callback_query(call.id)
+            # Переходим к обращению
+            state_manager.set_state(chat_id, UserState.APPEAL)
+            self.bot.edit_message_text(
+                messages.APPEAL_PROMPT,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.back_to_menu_inline()
+            )
+
+        elif call.data == "menu_application":
+            self.bot.answer_callback_query(call.id)
+            # Переходим к заявке
+            state_manager.set_state(chat_id, UserState.APPLICATION_FIO)
+            self.bot.edit_message_text(
+                messages.APPLICATION_WELCOME,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.back_to_menu_inline()
+            )
+
+        elif call.data == "menu_info":
+            self.bot.answer_callback_query(call.id)
+            self.bot.edit_message_text(
+                messages.COUNCIL_INFO,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.back_to_menu_inline()
+            )
+
+        elif call.data == "menu_leadership":
+            self.bot.answer_callback_query(call.id)
+            self.bot.edit_message_text(
+                messages.LEADERSHIP_INFO,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.back_to_menu_inline()
+            )
+
+        elif call.data == "menu_faq":
+            self.bot.answer_callback_query(call.id)
+            faq_text = """<b>❓ Часто задаваемые вопросы</b>
+
+<b>1. Кто может вступить в Совет?</b>
+В Совет могут вступить дети и молодёжь от 10 до 25 лет, проживающие в Благовещенске.
+
+<b>2. Сколько рассматривается заявка?</b>
+Заявки рассматриваются в течение 5 рабочих дней. Результат придет в этот чат.
+
+<b>3. Какие документы нужны для вступления?</b>
+Специальные документы не требуются, достаточно заполнить заявку в боте.
+
+<b>4. Чем занимается Совет?</b>
+Мы защищаем права детей, организуем мероприятия, проводим акции и помогаем развивать молодежные инициативы.
+
+<b>5. Как связаться с Советом?</b>
+Используйте раздел "Обращение в Совет" в этом боте, и мы ответим вам в ближайшее время.
+
+<b>6. Могу ли я отправить фото в обращении?</b>
+Да! Просто прикрепите фото или документ к сообщению.
+
+<b>7. Как узнать статус моей заявки?</b>
+Используйте команду /my_applications
+
+<b>Остались вопросы?</b> Задайте их через раздел "Обращение в Совет"!"""
+            self.bot.edit_message_text(
+                faq_text,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.back_to_menu_inline()
+            )
+
+        elif call.data == "back_to_menu":
+            self.bot.answer_callback_query(call.id)
+            # Сбрасываем состояние
+            state_manager.reset_state(chat_id)
+            # Отправляем главное меню
+            self.bot.edit_message_text(
+                messages.WELCOME,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=keyboards.main_menu_inline()
+            )
 
     # ============ Обработчики кнопок меню ============
 
