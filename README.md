@@ -53,18 +53,39 @@ cp .env.example .env
 python bot.py
 ```
 
+## Развертывание на PythonAnywhere
+
+**Хотите запустить бота в облаке 24/7?**
+
+📖 Смотрите подробную инструкцию: **[PYTHONANYWHERE_DEPLOY.md](PYTHONANYWHERE_DEPLOY.md)**
+
+Быстрый старт:
+```bash
+./deploy_helper.sh
+```
+
+Этот скрипт поможет:
+- Создать виртуальное окружение
+- Установить зависимости
+- Настроить конфигурацию
+- Провести тестовый запуск
+
 ## Структура проекта
 
 ```
 .
-├── bot.py              # Основной файл бота
-├── config.py           # Конфигурация
-├── database.py         # Работа с базой данных
-├── keyboards.py        # Клавиатуры бота
-├── requirements.txt    # Зависимости
-├── .env.example        # Пример конфигурации
-├── .gitignore         # Игнорируемые файлы
-└── README.md          # Документация
+├── bot.py                          # Основной файл бота
+├── config.py                       # Конфигурация
+├── database.py                     # Работа с базой данных
+├── keyboards.py                    # Клавиатуры бота
+├── requirements.txt                # Зависимости
+├── .env.example                    # Пример конфигурации
+├── .gitignore                      # Игнорируемые файлы
+├── README.md                       # Документация
+├── PYTHONANYWHERE_DEPLOY.md        # Инструкция по деплою
+├── deploy_helper.sh                # Скрипт-помощник для развертывания
+├── run.sh                          # Скрипт запуска
+└── appeals-bot.service.example     # Пример systemd service
 ```
 
 ## Использование
