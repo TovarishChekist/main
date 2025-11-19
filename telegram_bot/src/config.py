@@ -75,6 +75,10 @@ class Config:
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         date_format = '%Y-%m-%d %H:%M:%S'
 
+        # Безопасное получение уровня логирования
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        log_level = cls.LOG_LEVEL.upper() if cls.LOG_LEVEL.upper() in valid_levels else 'INFO'
+
         # Настройка обработчиков
         handlers = [
             logging.FileHandler(cls.LOG_FILE, encoding='utf-8'),
@@ -83,7 +87,7 @@ class Config:
 
         # Базовая настройка
         logging.basicConfig(
-            level=getattr(logging, cls.LOG_LEVEL),
+            level=getattr(logging, log_level),
             format=log_format,
             datefmt=date_format,
             handlers=handlers
