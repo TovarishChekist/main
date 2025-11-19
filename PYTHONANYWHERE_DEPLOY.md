@@ -2,6 +2,22 @@
 
 Пошаговая инструкция по запуску Telegram бота на хостинге PythonAnywhere.
 
+## Быстрое решение проблемы "directory already exists"
+
+Если при клонировании репозитория вы получили ошибку:
+```
+destination path 'main' already exists and is not an empty directory.
+```
+
+**Решение:** Клонируйте в директорию с другим именем:
+
+```bash
+git clone https://github.com/TovarishChekist/main.git telegram-appeals-bot
+cd telegram-appeals-bot
+```
+
+Затем везде в инструкции используйте `telegram-appeals-bot` вместо `main`.
+
 ## Важно: Требования к аккаунту
 
 ⚠️ **Для запуска Telegram бота на PythonAnywhere требуется платный аккаунт!**
@@ -27,14 +43,22 @@
 2. Клонируйте репозиторий:
 
 ```bash
-git clone https://github.com/ваш-username/ваш-репозиторий.git
-cd ваш-репозиторий
+# Если директория main уже существует, используйте другое имя:
+git clone https://github.com/TovarishChekist/main.git telegram-appeals-bot
+cd telegram-appeals-bot
+
+# Или удалите существующую директорию (ОСТОРОЖНО!):
+# rm -rf main
+# git clone https://github.com/TovarishChekist/main.git
+# cd main
 ```
+
+**Важно:** Замените `TovarishChekist/main` на путь к вашему репозиторию!
 
 ### Вариант 2: Загрузка через Files
 
 1. Перейдите в раздел **Files**
-2. Создайте директорию для бота (например, `telegram-bot`)
+2. Создайте директорию для бота (например, `telegram-appeals-bot`)
 3. Загрузите все файлы проекта через интерфейс
 
 ## Шаг 3: Создание виртуального окружения
@@ -42,8 +66,8 @@ cd ваш-репозиторий
 В **Bash console**:
 
 ```bash
-# Переходим в директорию проекта
-cd ~/ваш-репозиторий
+# Переходим в директорию проекта (замените на имя вашей директории)
+cd ~/telegram-appeals-bot
 
 # Создаём виртуальное окружение
 python3.10 -m venv venv
@@ -57,6 +81,8 @@ pip install --upgrade pip
 # Устанавливаем зависимости
 pip install -r requirements.txt
 ```
+
+**Примечание:** Если `python3.10` не найден, попробуйте `python3.9` или просто `python3`.
 
 ## Шаг 4: Настройка переменных окружения
 
@@ -92,19 +118,24 @@ python bot.py
 2. В секции **Always-on tasks** нажмите **Create a new always-on task**
 3. Заполните поля:
    - **Description**: `Telegram Appeals Bot`
-   - **Command**: `/home/ваш_username/ваш-репозиторий/venv/bin/python /home/ваш_username/ваш-репозиторий/bot.py`
-   - **Working directory**: `/home/ваш_username/ваш-репозиторий`
+   - **Command**: `/home/ваш_username/telegram-appeals-bot/venv/bin/python /home/ваш_username/telegram-appeals-bot/bot.py`
+   - **Working directory**: `/home/ваш_username/telegram-appeals-bot`
 
 4. Нажмите **Create**
 5. Включите задачу кнопкой **Enable**
 
 ### Пример команды
 
-Если ваш username `myuser` и репозиторий `telegram-bot`:
+Если ваш username `myuser` и директория `telegram-appeals-bot`:
 
 ```bash
-/home/myuser/telegram-bot/venv/bin/python /home/myuser/telegram-bot/bot.py
+/home/myuser/telegram-appeals-bot/venv/bin/python /home/myuser/telegram-appeals-bot/bot.py
 ```
+
+**Важно:**
+- Замените `myuser` на ваш username в PythonAnywhere
+- Замените `telegram-appeals-bot` на имя директории, которую вы использовали при клонировании
+- Не добавляйте никаких дополнительных параметров или аргументов
 
 ## Шаг 7: Мониторинг
 
@@ -147,11 +178,11 @@ python bot.py
 Когда нужно обновить код:
 
 ```bash
-# В Bash console
-cd ~/ваш-репозиторий
+# В Bash console (замените telegram-appeals-bot на имя вашей директории)
+cd ~/telegram-appeals-bot
 
 # Получаем изменения
-git pull origin main
+git pull origin claude/telegram-appeals-bot-01Kcjxmnqtvp6LNYvk8Vv2Uw
 
 # Активируем окружение
 source venv/bin/activate
@@ -164,15 +195,16 @@ pip install -r requirements.txt
 
 ## Автоматическое обновление через скрипт
 
-Создайте файл `update.sh`:
+Создайте файл `update.sh` в директории с ботом:
 
 ```bash
 #!/bin/bash
-cd ~/telegram-bot
-git pull origin main
+# Замените telegram-appeals-bot на имя вашей директории
+cd ~/telegram-appeals-bot
+git pull origin claude/telegram-appeals-bot-01Kcjxmnqtvp6LNYvk8Vv2Uw
 source venv/bin/activate
 pip install -r requirements.txt
-echo "Bot updated! Restart the Always-On Task manually."
+echo "Bot updated! Restart the Always-On Task manually in PythonAnywhere dashboard."
 ```
 
 Сделайте исполняемым:
@@ -184,6 +216,7 @@ chmod +x update.sh
 Запускайте для обновления:
 
 ```bash
+cd ~/telegram-appeals-bot
 ./update.sh
 ```
 
@@ -217,7 +250,7 @@ pip install -r requirements.txt --force-reinstall
 Проверьте права на запись:
 
 ```bash
-chmod 755 ~/ваш-репозиторий
+chmod 755 ~/telegram-appeals-bot
 ```
 
 ### Бот постоянно падает
