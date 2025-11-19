@@ -102,11 +102,28 @@ class Database:
                 )
             """)
 
+            # Таблица блокировок пользователей
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    blocked_by INTEGER NOT NULL,
+                    blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    unblocked_at TIMESTAMP,
+                    is_active INTEGER DEFAULT 1,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    FOREIGN KEY (blocked_by) REFERENCES users (user_id)
+                )
+            """)
+
             # Индексы для оптимизации
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_appeals_user ON appeals(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_appeals_status ON appeals(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocks_user ON user_blocks(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocks_active ON user_blocks(is_active)")
 
             logger.info("База данных инициализирована успешно")
 
@@ -299,6 +316,91 @@ class Database:
             stats['approved_applications'] = cursor.fetchone()[0]
 
             return stats
+
+    # ========== БЛОКИРОВКИ ПОЛЬЗОВАТЕЛЕЙ ==========
+
+    def block_user(self, user_id: int, reason: str, blocked_by: int) -> int:
+        """Заблокировать пользователя"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Сначала деактивируем все предыдущие блокировки
+            cursor.execute("""
+                UPDATE user_blocks
+                SET is_active = 0, unblocked_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND is_active = 1
+            """, (user_id,))
+
+            # Добавляем новую блокировку
+            cursor.execute("""
+                INSERT INTO user_blocks (user_id, reason, blocked_by)
+                VALUES (?, ?, ?)
+            """, (user_id, reason, blocked_by))
+            block_id = cursor.lastrowid
+            logger.info(f"Пользователь {user_id} заблокирован администратором {blocked_by}. Причина: {reason}")
+            return block_id
+
+    def unblock_user(self, user_id: int) -> bool:
+        """Разблокировать пользователя"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE user_blocks
+                SET is_active = 0, unblocked_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND is_active = 1
+            """, (user_id,))
+
+            if cursor.rowcount > 0:
+                logger.info(f"Пользователь {user_id} разблокирован")
+                return True
+            return False
+
+    def is_user_blocked(self, user_id: int) -> bool:
+        """Проверить, заблокирован ли пользователь"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM user_blocks
+                WHERE user_id = ? AND is_active = 1
+            """, (user_id,))
+            return cursor.fetchone()[0] > 0
+
+    def get_block_info(self, user_id: int) -> Optional[Dict]:
+        """Получить информацию о блокировке пользователя"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM user_blocks
+                WHERE user_id = ? AND is_active = 1
+                ORDER BY blocked_at DESC
+                LIMIT 1
+            """, (user_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_blocked_users(self) -> List[Dict]:
+        """Получить список всех заблокированных пользователей"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ub.*, u.username, u.first_name, u.last_name
+                FROM user_blocks ub
+                LEFT JOIN users u ON ub.user_id = u.user_id
+                WHERE ub.is_active = 1
+                ORDER BY ub.blocked_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_block_history(self, user_id: int) -> List[Dict]:
+        """Получить историю блокировок пользователя"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM user_blocks
+                WHERE user_id = ?
+                ORDER BY blocked_at DESC
+            """, (user_id,))
+            return [dict(row) for row in cursor.fetchall()]
 
 
 # Глобальный экземпляр базы данных (будет инициализирован в config)

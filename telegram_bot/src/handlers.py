@@ -35,6 +35,14 @@ class BotHandlers:
         self.bot.register_message_handler(self.cmd_my_applications, commands=['my_applications'])
         self.bot.register_message_handler(self.cmd_stats, commands=['stats'])
 
+        # Админ-команды
+        self.bot.register_message_handler(self.cmd_admin, commands=['admin'])
+        self.bot.register_message_handler(self.cmd_block, commands=['block'])
+        self.bot.register_message_handler(self.cmd_unblock, commands=['unblock'])
+        self.bot.register_message_handler(self.cmd_blocked_list, commands=['blocked_list'])
+        self.bot.register_message_handler(self.cmd_user_info, commands=['user_info'])
+        self.bot.register_message_handler(self.cmd_clear_logs, commands=['clear_logs'])
+
         # Callback-кнопки для админов
         self.bot.register_callback_query_handler(
             self.handle_admin_callback,
@@ -104,6 +112,17 @@ class BotHandlers:
             user.first_name,
             user.last_name
         )
+
+        # Проверяем блокировку
+        if self.db.is_user_blocked(user.id):
+            block_info = self.db.get_block_info(user.id)
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.USER_IS_BLOCKED.format(reason=block_info['reason']),
+                parse_mode='HTML'
+            )
+            return
 
         # Логируем событие
         self.db.log_event('bot_start', f'user_id:{user.id}')
@@ -229,6 +248,366 @@ class BotHandlers:
             text,
             parse_mode='HTML'
         )
+
+    # ============ Админ-команды ============
+
+    def _is_admin(self, user_id: int) -> bool:
+        """Проверка, является ли пользователь администратором"""
+        return user_id == config.ADMIN_CHAT_ID
+
+    def cmd_admin(self, message: Message):
+        """Показать админ-панель"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        self.msg_manager.safe_send_message(
+            self.bot,
+            message.chat.id,
+            messages.ADMIN_PANEL,
+            parse_mode='HTML'
+        )
+
+    def cmd_block(self, message: Message):
+        """Заблокировать пользователя"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        # Парсинг команды: /block <user_id> <причина>
+        parts = message.text.split(maxsplit=2)
+        if len(parts) < 3:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/block <user_id> <причина>"),
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            user_id = int(parts[1])
+            reason = parts[2]
+        except ValueError:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/block <user_id> <причина>"),
+                parse_mode='HTML'
+            )
+            return
+
+        # Нельзя заблокировать админа
+        if user_id == config.ADMIN_CHAT_ID:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_CANNOT_BLOCK_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        # Проверяем, не заблокирован ли уже
+        if self.db.is_user_blocked(user_id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_USER_ALREADY_BLOCKED,
+                parse_mode='HTML'
+            )
+            return
+
+        # Блокируем пользователя
+        try:
+            from datetime import datetime
+            self.db.block_user(user_id, reason, message.from_user.id)
+            blocked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Уведомляем админа
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.USER_BLOCKED.format(
+                    user_id=user_id,
+                    reason=reason,
+                    blocked_at=blocked_at
+                ),
+                parse_mode='HTML'
+            )
+
+            # Уведомляем пользователя
+            try:
+                self.msg_manager.safe_send_message(
+                    self.bot,
+                    user_id,
+                    messages.USER_IS_BLOCKED.format(reason=reason),
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при блокировке пользователя: {e}")
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                f"❌ Ошибка при блокировке: {e}",
+                parse_mode='HTML'
+            )
+
+    def cmd_unblock(self, message: Message):
+        """Разблокировать пользователя"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        # Парсинг команды: /unblock <user_id>
+        parts = message.text.split()
+        if len(parts) != 2:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/unblock <user_id>"),
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            user_id = int(parts[1])
+        except ValueError:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/unblock <user_id>"),
+                parse_mode='HTML'
+            )
+            return
+
+        # Проверяем, заблокирован ли пользователь
+        if not self.db.is_user_blocked(user_id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_USER_NOT_BLOCKED,
+                parse_mode='HTML'
+            )
+            return
+
+        # Разблокируем
+        try:
+            from datetime import datetime
+            self.db.unblock_user(user_id)
+            unblocked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Уведомляем админа
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.USER_UNBLOCKED.format(
+                    user_id=user_id,
+                    unblocked_at=unblocked_at
+                ),
+                parse_mode='HTML'
+            )
+
+            # Уведомляем пользователя
+            try:
+                self.msg_manager.safe_send_message(
+                    self.bot,
+                    user_id,
+                    messages.USER_WAS_UNBLOCKED,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при разблокировке пользователя: {e}")
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                f"❌ Ошибка при разблокировке: {e}",
+                parse_mode='HTML'
+            )
+
+    def cmd_blocked_list(self, message: Message):
+        """Список заблокированных пользователей"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        blocked_users = self.db.get_blocked_users()
+
+        if not blocked_users:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.NO_BLOCKED_USERS,
+                parse_mode='HTML'
+            )
+            return
+
+        text = messages.BLOCKED_LIST_HEADER.format(count=len(blocked_users))
+
+        for i, user in enumerate(blocked_users, 1):
+            name = user.get('first_name', 'Неизвестно')
+            if user.get('last_name'):
+                name += f" {user['last_name']}"
+
+            username = f"@{user['username']}" if user.get('username') else 'нет username'
+
+            text += messages.BLOCKED_USER_ITEM.format(
+                num=i,
+                user_id=user['user_id'],
+                name=name,
+                username=username,
+                reason=user['reason'],
+                blocked_at=user['blocked_at'][:16]
+            )
+
+        self.msg_manager.safe_send_message(
+            self.bot,
+            message.chat.id,
+            text,
+            parse_mode='HTML'
+        )
+
+    def cmd_user_info(self, message: Message):
+        """Информация о пользователе"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        # Парсинг команды: /user_info <user_id>
+        parts = message.text.split()
+        if len(parts) != 2:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/user_info <user_id>"),
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            user_id = int(parts[1])
+        except ValueError:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_INVALID_COMMAND.format(usage="/user_info <user_id>"),
+                parse_mode='HTML'
+            )
+            return
+
+        # Получаем информацию о пользователе
+        user = self.db.get_user(user_id)
+        if not user:
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_USER_NOT_FOUND,
+                parse_mode='HTML'
+            )
+            return
+
+        # Формируем информацию
+        text = f"""👤 <b>Информация о пользователе</b>
+
+<b>ID:</b> {user['user_id']}
+<b>Имя:</b> {user.get('first_name', 'Неизвестно')}
+<b>Фамилия:</b> {user.get('last_name', 'Нет')}
+<b>Username:</b> @{user.get('username', 'нет')}
+<b>Дата регистрации:</b> {user['created_at'][:16]}
+<b>Последняя активность:</b> {user['last_active'][:16]}
+
+"""
+
+        # Проверяем блокировку
+        if self.db.is_user_blocked(user_id):
+            block_info = self.db.get_block_info(user_id)
+            text += f"""<b>🚫 Статус:</b> Заблокирован
+<b>Причина:</b> {block_info['reason']}
+<b>Дата блокировки:</b> {block_info['blocked_at'][:16]}
+"""
+        else:
+            text += "<b>✅ Статус:</b> Активен\n"
+
+        # Статистика пользователя
+        appeals = self.db.get_user_appeals(user_id)
+        applications = self.db.get_user_applications(user_id)
+
+        text += f"""
+<b>📊 Статистика:</b>
+• Обращений: {len(appeals)}
+• Заявок: {len(applications)}
+"""
+
+        self.msg_manager.safe_send_message(
+            self.bot,
+            message.chat.id,
+            text,
+            parse_mode='HTML'
+        )
+
+    def cmd_clear_logs(self, message: Message):
+        """Очистить файл логов"""
+        if not self._is_admin(message.from_user.id):
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.ERROR_NOT_ADMIN,
+                parse_mode='HTML'
+            )
+            return
+
+        try:
+            # Очищаем файл логов
+            with open(config.LOG_FILE, 'w', encoding='utf-8') as f:
+                f.write('')
+
+            logger.info(f"Логи очищены администратором {message.from_user.id}")
+
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                messages.LOGS_CLEARED,
+                parse_mode='HTML'
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка при очистке логов: {e}")
+            self.msg_manager.safe_send_message(
+                self.bot,
+                message.chat.id,
+                f"❌ Ошибка при очистке логов: {e}",
+                parse_mode='HTML'
+            )
 
     # ============ Главное меню ============
 
@@ -424,6 +803,20 @@ class BotHandlers:
     def handle_media(self, message: Message):
         """Обработка фото, документов, видео"""
         chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        # Проверяем блокировку
+        if not self._is_admin(user_id):
+            if self.db.is_user_blocked(user_id):
+                block_info = self.db.get_block_info(user_id)
+                self.msg_manager.safe_send_message(
+                    self.bot,
+                    chat_id,
+                    messages.USER_IS_BLOCKED.format(reason=block_info['reason']),
+                    parse_mode='HTML'
+                )
+                return
+
         current_state = state_manager.get_state(chat_id)
 
         # Медиафайлы поддерживаются только для обращений
@@ -535,6 +928,20 @@ class BotHandlers:
     def handle_user_message(self, message: Message):
         """Обработчик текстовых сообщений от пользователей"""
         chat_id = message.chat.id
+        user_id = message.from_user.id
+
+        # Проверяем блокировку (кроме админа и групповых чатов)
+        if chat_id > 0 and not self._is_admin(user_id):  # Приватный чат
+            if self.db.is_user_blocked(user_id):
+                block_info = self.db.get_block_info(user_id)
+                self.msg_manager.safe_send_message(
+                    self.bot,
+                    chat_id,
+                    messages.USER_IS_BLOCKED.format(reason=block_info['reason']),
+                    parse_mode='HTML'
+                )
+                return
+
         current_state = state_manager.get_state(chat_id)
 
         # Обработка в зависимости от состояния

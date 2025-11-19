@@ -28,6 +28,9 @@ class Config:
     APPEAL_CHAT_ID: int = int(os.getenv('APPEAL_CHAT_ID', '0'))
     APPLICATION_CHAT_ID: int = int(os.getenv('APPLICATION_CHAT_ID', '0'))
 
+    # ID главного администратора
+    ADMIN_CHAT_ID: int = int(os.getenv('ADMIN_CHAT_ID', '0'))
+
     # Настройки логирования
     LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
     LOG_DIR: Path = BASE_DIR / 'logs'
@@ -57,6 +60,9 @@ class Config:
 
         if not cls.APPLICATION_CHAT_ID:
             errors.append("APPLICATION_CHAT_ID не установлен")
+
+        if not cls.ADMIN_CHAT_ID:
+            errors.append("ADMIN_CHAT_ID не установлен")
 
         if errors:
             for error in errors:
