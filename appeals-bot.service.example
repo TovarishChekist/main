@@ -1,0 +1,18 @@
+# Пример systemd service для автозапуска бота
+# Скопируйте в /etc/systemd/system/appeals-bot.service
+# и отредактируйте пути
+
+[Unit]
+Description=Telegram Appeals Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your_user
+WorkingDirectory=/path/to/bot
+ExecStart=/path/to/bot/venv/bin/python /path/to/bot/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
