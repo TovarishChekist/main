@@ -1,0 +1,50 @@
+MIT License
+
+Copyright (c) 2024 Telegram Encryption Bot
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+DISCLAIMER:
+
+This software is provided for educational and research purposes. While every
+effort has been made to implement cryptographic best practices, this software
+has not undergone a formal security audit. For critical applications requiring
+high security, please use well-established and audited solutions such as
+Signal, Wire, or similar.
+
+The authors and contributors are not responsible for any damages, data loss,
+or security breaches resulting from the use of this software.
+
+CRYPTOGRAPHIC NOTICE:
+
+This software includes cryptographic functionality. Some countries may have
+restrictions on the import, possession, use, and/or re-export of encryption
+software. Users are responsible for compliance with local laws and regulations.
+
+SECURITY:
+
+- Always verify public keys through an out-of-band channel
+- Use strong, unique passwords for key derivation
+- Regularly rotate encryption keys
+- Keep the software updated
+- Report security vulnerabilities responsibly
+
+For more information, see SECURITY.md

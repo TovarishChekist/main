@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  encryption-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-encryption-bot
+    restart: unless-stopped
+
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_REQUESTS_PER_MINUTE=${MAX_REQUESTS_PER_MINUTE:-30}
+      - MAX_REQUESTS_PER_HOUR=${MAX_REQUESTS_PER_HOUR:-500}
+
+    env_file:
+      - .env
+
+    volumes:
+      # Mount logs directory (read-only app code)
+      - ./logs:/app/logs
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+
+    # Read-only root filesystem for extra security
+    read_only: true
+
+    # Temporary filesystem for runtime data
+    tmpfs:
+      - /tmp
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Network isolation
+    networks:
+      - bot-network
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  bot-network:
+    driver: bridge
