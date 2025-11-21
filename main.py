@@ -5,8 +5,15 @@ Telegram бот для приёма обращений Председателю 
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+
+# Проверка версии aiogram и импорт соответствующих модулей
+try:
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    AIOGRAM_3 = True
+except ImportError:
+    # Для aiogram 2.x
+    AIOGRAM_3 = False
 
 from bot.config import BOT_TOKEN
 from bot.handlers import router
@@ -31,23 +38,36 @@ async def main():
     logger.info("База данных инициализирована")
 
     # Создание бота и диспетчера
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    dp = Dispatcher()
+    if AIOGRAM_3:
+        # aiogram 3.x
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        dp = Dispatcher()
+        dp.include_router(router)
 
-    # Регистрация роутеров
-    dp.include_router(router)
+        logger.info("Бот запущен и готов к работе! (aiogram 3.x)")
+        logger.info("Нажмите Ctrl+C для остановки")
 
-    logger.info("Бот запущен и готов к работе!")
-    logger.info("Нажмите Ctrl+C для остановки")
+        try:
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        finally:
+            await bot.session.close()
+    else:
+        # aiogram 2.x
+        from aiogram import types
+        bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
+        dp = Dispatcher(bot)
+        dp.include_router(router)
 
-    # Запуск поллинга
-    try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    finally:
-        await bot.session.close()
+        logger.info("Бот запущен и готов к работе! (aiogram 2.x)")
+        logger.info("Нажмите Ctrl+C для остановки")
+
+        try:
+            await dp.start_polling()
+        finally:
+            await bot.close()
 
 if __name__ == "__main__":
     try:
