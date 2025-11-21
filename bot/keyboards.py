@@ -41,3 +41,76 @@ def get_status_keyboard(appeal_id: int):
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
     return keyboard
+
+# Админские клавиатуры
+
+def get_admin_menu():
+    """Главное меню администратора"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🆕 Новые обращения", callback_data="admin_new")],
+        [InlineKeyboardButton(text="⏳ В работе", callback_data="admin_in_progress")],
+        [InlineKeyboardButton(text="✅ Закрытые", callback_data="admin_closed")],
+        [InlineKeyboardButton(text="📋 Все обращения", callback_data="admin_all")],
+        [InlineKeyboardButton(text="🔍 Поиск", callback_data="admin_search")],
+        [InlineKeyboardButton(text="💾 Экспорт данных", callback_data="admin_export")]
+    ])
+    return keyboard
+
+def get_admin_back():
+    """Кнопка возврата в админ-панель"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")]
+    ])
+    return keyboard
+
+def get_appeal_detail_admin(appeal_id: int):
+    """Детальный просмотр обращения для админа"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Ответить", callback_data=f"reply_{appeal_id}")],
+        [InlineKeyboardButton(text="✅ Принять в работу", callback_data=f"accept_{appeal_id}")],
+        [InlineKeyboardButton(text="📋 Закрыть", callback_data=f"close_{appeal_id}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_panel")]
+    ])
+    return keyboard
+
+def get_pagination_keyboard(callback_prefix: str, page: int, total_pages: int):
+    """Клавиатура с пагинацией"""
+    buttons = []
+
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{callback_prefix}_page_{page-1}"))
+
+    nav_buttons.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="noop"))
+
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"{callback_prefix}_page_{page+1}"))
+
+    if nav_buttons:
+        buttons.append(nav_buttons)
+
+    # Кнопка возврата
+    buttons.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_quick_replies():
+    """Быстрые ответы для админа"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Спасибо за обращение", callback_data="quick_thanks")],
+        [InlineKeyboardButton(text="⏳ Обращение в работе", callback_data="quick_in_progress")],
+        [InlineKeyboardButton(text="📋 Обращение рассмотрено", callback_data="quick_reviewed")],
+        [InlineKeyboardButton(text="✏️ Написать своё", callback_data="quick_custom")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_panel")]
+    ])
+    return keyboard
+
+def get_search_result_actions(appeal_id: int):
+    """Действия с результатом поиска"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👁️ Подробнее", callback_data=f"view_{appeal_id}")],
+        [InlineKeyboardButton(text="🔙 Назад к поиску", callback_data="admin_search")]
+    ])
+    return keyboard

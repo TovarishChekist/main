@@ -87,3 +87,130 @@ async def get_new_appeals() -> List[Dict]:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+async def get_appeals_by_status(status: str, limit: int = 10, offset: int = 0) -> List[Dict]:
+    """Получение обращений по статусу с пагинацией"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM appeals WHERE status = ?
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (status, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+async def get_all_appeals(limit: int = 10, offset: int = 0) -> List[Dict]:
+    """Получение всех обращений с пагинацией"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM appeals ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+async def count_appeals_by_status(status: str) -> int:
+    """Подсчёт обращений по статусу"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        async with db.execute(
+            """SELECT COUNT(*) FROM appeals WHERE status = ?""",
+            (status,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+async def count_all_appeals() -> int:
+    """Подсчёт всех обращений"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        async with db.execute(
+            """SELECT COUNT(*) FROM appeals"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+async def get_statistics() -> Dict:
+    """Получение статистики по обращениям"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        stats = {}
+
+        # Общее количество
+        async with db.execute("SELECT COUNT(*) FROM appeals") as cursor:
+            row = await cursor.fetchone()
+            stats['total'] = row[0] if row else 0
+
+        # По статусам
+        for status in ['new', 'in_progress', 'closed']:
+            async with db.execute(
+                "SELECT COUNT(*) FROM appeals WHERE status = ?", (status,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                stats[status] = row[0] if row else 0
+
+        # За сегодня
+        async with db.execute(
+            """SELECT COUNT(*) FROM appeals
+               WHERE date(created_at) = date('now')"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['today'] = row[0] if row else 0
+
+        # За неделю
+        async with db.execute(
+            """SELECT COUNT(*) FROM appeals
+               WHERE date(created_at) >= date('now', '-7 days')"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['week'] = row[0] if row else 0
+
+        # За месяц
+        async with db.execute(
+            """SELECT COUNT(*) FROM appeals
+               WHERE date(created_at) >= date('now', '-30 days')"""
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['month'] = row[0] if row else 0
+
+        return stats
+
+async def search_appeals(query: str) -> List[Dict]:
+    """Поиск обращений по тексту, имени или username"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        search_pattern = f"%{query}%"
+        async with db.execute(
+            """SELECT * FROM appeals
+               WHERE message LIKE ? OR full_name LIKE ? OR username LIKE ?
+               ORDER BY created_at DESC LIMIT 20""",
+            (search_pattern, search_pattern, search_pattern)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+async def export_appeals_to_text() -> str:
+    """Экспорт всех обращений в текстовый формат"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM appeals ORDER BY created_at DESC"""
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+            text = "ЭКСПОРТ ОБРАЩЕНИЙ\n"
+            text += "=" * 80 + "\n\n"
+
+            for row in rows:
+                appeal = dict(row)
+                text += f"ID: {appeal['id']}\n"
+                text += f"От: {appeal['full_name']} (@{appeal['username']})\n"
+                text += f"User ID: {appeal['user_id']}\n"
+                text += f"Дата: {appeal['created_at']}\n"
+                text += f"Статус: {appeal['status']}\n"
+                text += f"Сообщение: {appeal['message']}\n"
+                if appeal['response']:
+                    text += f"Ответ: {appeal['response']}\n"
+                    text += f"Дата ответа: {appeal['admin_response_at']}\n"
+                text += "-" * 80 + "\n\n"
+
+            return text

@@ -8,11 +8,16 @@ from datetime import datetime
 
 from database.db import (
     create_appeal, get_user_appeals, get_appeal,
-    update_appeal_status, add_admin_response, get_new_appeals
+    update_appeal_status, add_admin_response, get_new_appeals,
+    get_statistics, get_appeals_by_status, get_all_appeals,
+    count_appeals_by_status, count_all_appeals, search_appeals,
+    export_appeals_to_text
 )
 from bot.keyboards import (
     get_main_menu, get_cancel_keyboard, get_back_to_menu,
-    get_appeal_actions, get_status_keyboard
+    get_appeal_actions, get_status_keyboard, get_admin_menu,
+    get_admin_back, get_appeal_detail_admin, get_pagination_keyboard,
+    get_quick_replies, get_search_result_actions
 )
 from bot.config import ADMIN_ID
 
@@ -24,6 +29,7 @@ class AppealStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_for_response = State()
+    waiting_for_search = State()
 
 # Форматирование статуса
 def format_status(status: str) -> str:
@@ -330,25 +336,373 @@ async def close_appeal(callback: CallbackQuery):
 
 @router.message(Command("admin"))
 async def admin_panel(message: Message):
-    """Админ-панель"""
+    """Расширенная админ-панель"""
     if message.from_user.id != ADMIN_ID:
         return
 
-    new_appeals = await get_new_appeals()
+    stats = await get_statistics()
 
     text = (
         "👑 <b>Панель администратора</b>\n\n"
-        f"🆕 Новых обращений: {len(new_appeals)}\n\n"
+        "📊 <b>Статистика:</b>\n"
+        f"• Всего обращений: {stats['total']}\n"
+        f"• 🆕 Новых: {stats['new']}\n"
+        f"• ⏳ В работе: {stats['in_progress']}\n"
+        f"• ✅ Закрытых: {stats['closed']}\n\n"
+        f"📅 За сегодня: {stats['today']}\n"
+        f"📅 За неделю: {stats['week']}\n"
+        f"📅 За месяц: {stats['month']}\n\n"
+        "Выберите действие из меню ниже:"
     )
 
-    if new_appeals:
-        text += "<b>Последние обращения:</b>\n\n"
-        for appeal in new_appeals[:5]:
-            date = format_date(appeal['created_at'])
-            text += (
-                f"📌 #{appeal['id']} | {date}\n"
-                f"👤 {appeal['full_name']}\n"
-                f"💬 {appeal['message'][:50]}...\n\n"
-            )
+    await message.answer(text, reply_markup=get_admin_menu(), parse_mode="HTML")
 
-    await message.answer(text, parse_mode="HTML")
+@router.callback_query(F.data == "admin_panel")
+async def show_admin_panel(callback: CallbackQuery, state: FSMContext):
+    """Показать админ-панель"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await state.clear()
+    stats = await get_statistics()
+
+    text = (
+        "👑 <b>Панель администратора</b>\n\n"
+        "📊 <b>Статистика:</b>\n"
+        f"• Всего обращений: {stats['total']}\n"
+        f"• 🆕 Новых: {stats['new']}\n"
+        f"• ⏳ В работе: {stats['in_progress']}\n"
+        f"• ✅ Закрытых: {stats['closed']}\n\n"
+        f"📅 За сегодня: {stats['today']}\n"
+        f"📅 За неделю: {stats['week']}\n"
+        f"📅 За месяц: {stats['month']}\n\n"
+        "Выберите действие из меню ниже:"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_menu(), parse_mode="HTML")
+    await callback.answer()
+
+# Расширенные функции админ-панели
+
+@router.callback_query(F.data == "admin_stats")
+async def show_admin_stats(callback: CallbackQuery):
+    """Подробная статистика"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    stats = await get_statistics()
+
+    text = (
+        "📊 <b>Подробная статистика</b>\n\n"
+        f"📈 <b>Общие показатели:</b>\n"
+        f"• Всего обращений: <code>{stats['total']}</code>\n\n"
+        f"📋 <b>По статусам:</b>\n"
+        f"• 🆕 Новых: <code>{stats['new']}</code>\n"
+        f"• ⏳ В работе: <code>{stats['in_progress']}</code>\n"
+        f"• ✅ Закрытых: <code>{stats['closed']}</code>\n\n"
+        f"📅 <b>По периодам:</b>\n"
+        f"• Сегодня: <code>{stats['today']}</code>\n"
+        f"• За неделю: <code>{stats['week']}</code>\n"
+        f"• За месяц: <code>{stats['month']}</code>\n\n"
+    )
+
+    # Подсчёт процентов
+    if stats['total'] > 0:
+        closed_percent = round(stats['closed'] / stats['total'] * 100, 1)
+        text += f"✅ Закрыто от общего: <b>{closed_percent}%</b>\n"
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_new")
+async def show_new_appeals(callback: CallbackQuery):
+    """Новые обращения"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await show_appeals_by_status(callback, "new", "🆕 Новые обращения", 0)
+
+@router.callback_query(F.data == "admin_in_progress")
+async def show_in_progress_appeals(callback: CallbackQuery):
+    """Обращения в работе"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await show_appeals_by_status(callback, "in_progress", "⏳ Обращения в работе", 0)
+
+@router.callback_query(F.data == "admin_closed")
+async def show_closed_appeals(callback: CallbackQuery):
+    """Закрытые обращения"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await show_appeals_by_status(callback, "closed", "✅ Закрытые обращения", 0)
+
+@router.callback_query(F.data == "admin_all")
+async def show_all_appeals(callback: CallbackQuery):
+    """Все обращения"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    page = 0
+    limit = 5
+    appeals = await get_all_appeals(limit=limit, offset=page * limit)
+    total_count = await count_all_appeals()
+    total_pages = (total_count + limit - 1) // limit
+
+    if not appeals:
+        text = "📋 <b>Все обращения</b>\n\nОбращений пока нет."
+        await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+        await callback.answer()
+        return
+
+    text = f"📋 <b>Все обращения</b>\n\nВсего: {total_count}\n\n"
+
+    for appeal in appeals:
+        status = format_status(appeal['status'])
+        date = format_date(appeal['created_at'])
+        text += (
+            f"━━━━━━━━━━━━━━━\n"
+            f"📌 Обращение <code>#{appeal['id']}</code>\n"
+            f"👤 {appeal['full_name']}\n"
+            f"📅 {date}\n"
+            f"📊 Статус: {status}\n"
+            f"💬 {appeal['message'][:80]}{'...' if len(appeal['message']) > 80 else ''}\n\n"
+        )
+
+    keyboard = get_pagination_keyboard("admin_all", page, total_pages)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+async def show_appeals_by_status(callback: CallbackQuery, status: str, title: str, page: int):
+    """Универсальная функция для показа обращений по статусу"""
+    limit = 5
+    appeals = await get_appeals_by_status(status, limit=limit, offset=page * limit)
+    total_count = await count_appeals_by_status(status)
+    total_pages = max(1, (total_count + limit - 1) // limit)
+
+    if not appeals:
+        text = f"{title}\n\nОбращений с таким статусом нет."
+        await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+        await callback.answer()
+        return
+
+    text = f"{title}\n\nВсего: {total_count}\n\n"
+
+    for appeal in appeals:
+        date = format_date(appeal['created_at'])
+        text += (
+            f"━━━━━━━━━━━━━━━\n"
+            f"📌 <code>#{appeal['id']}</code> | {appeal['full_name']}\n"
+            f"📅 {date}\n"
+            f"💬 {appeal['message'][:80]}{'...' if len(appeal['message']) > 80 else ''}\n\n"
+        )
+
+    callback_prefix = f"admin_{status}"
+    keyboard = get_pagination_keyboard(callback_prefix, page, total_pages)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+# Обработчики пагинации
+@router.callback_query(F.data.regexp(r"admin_(new|in_progress|closed)_page_\d+"))
+async def handle_status_pagination(callback: CallbackQuery):
+    """Обработка пагинации по статусам"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    # Парсинг callback_data
+    parts = callback.data.split("_")
+    if parts[1] == "in":  # admin_in_progress_page_N
+        status = "in_progress"
+        page = int(parts[4])
+        title = "⏳ Обращения в работе"
+    else:
+        status = parts[1]  # new или closed
+        page = int(parts[3])
+        if status == "new":
+            title = "🆕 Новые обращения"
+        else:
+            title = "✅ Закрытые обращения"
+
+    await show_appeals_by_status(callback, status, title, page)
+
+@router.callback_query(F.data.regexp(r"admin_all_page_\d+"))
+async def handle_all_pagination(callback: CallbackQuery):
+    """Обработка пагинации всех обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    page = int(callback.data.split("_")[-1])
+    limit = 5
+    appeals = await get_all_appeals(limit=limit, offset=page * limit)
+    total_count = await count_all_appeals()
+    total_pages = (total_count + limit - 1) // limit
+
+    text = f"📋 <b>Все обращения</b>\n\nВсего: {total_count}\n\n"
+
+    for appeal in appeals:
+        status = format_status(appeal['status'])
+        date = format_date(appeal['created_at'])
+        text += (
+            f"━━━━━━━━━━━━━━━\n"
+            f"📌 Обращение <code>#{appeal['id']}</code>\n"
+            f"👤 {appeal['full_name']}\n"
+            f"📅 {date}\n"
+            f"📊 Статус: {status}\n"
+            f"💬 {appeal['message'][:80]}{'...' if len(appeal['message']) > 80 else ''}\n\n"
+        )
+
+    keyboard = get_pagination_keyboard("admin_all", page, total_pages)
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+# Поиск обращений
+@router.callback_query(F.data == "admin_search")
+async def start_search(callback: CallbackQuery, state: FSMContext):
+    """Начать поиск обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    text = (
+        "🔍 <b>Поиск обращений</b>\n\n"
+        "Введите текст для поиска:\n"
+        "• ID обращения (например: 123)\n"
+        "• Имя пользователя\n"
+        "• Текст обращения\n\n"
+        "Для отмены используйте кнопку ниже."
+    )
+
+    await callback.message.answer(text, reply_markup=get_cancel_keyboard(), parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_for_search)
+    await callback.answer()
+
+@router.message(AdminStates.waiting_for_search)
+async def process_search(message: Message, state: FSMContext):
+    """Обработка поискового запроса"""
+    if message.text == "❌ Отменить":
+        await cancel_action(message, state)
+        return
+
+    query = message.text.strip()
+
+    # Попытка поиска по ID
+    if query.isdigit():
+        appeal = await get_appeal(int(query))
+        if appeal:
+            appeals = [appeal]
+        else:
+            appeals = []
+    else:
+        appeals = await search_appeals(query)
+
+    await state.clear()
+
+    if not appeals:
+        text = f"🔍 <b>Результаты поиска</b>\n\nПо запросу «{query}» ничего не найдено."
+        await message.answer(text, reply_markup=get_admin_back(), parse_mode="HTML")
+        return
+
+    text = f"🔍 <b>Результаты поиска</b>\n\nПо запросу «{query}» найдено: {len(appeals)}\n\n"
+
+    for appeal in appeals[:10]:  # Показываем первые 10
+        status = format_status(appeal['status'])
+        date = format_date(appeal['created_at'])
+        text += (
+            f"━━━━━━━━━━━━━━━\n"
+            f"📌 <code>#{appeal['id']}</code> | {appeal['full_name']}\n"
+            f"📅 {date} | {status}\n"
+            f"💬 {appeal['message'][:100]}{'...' if len(appeal['message']) > 100 else ''}\n\n"
+        )
+
+    if len(appeals) > 10:
+        text += f"\n<i>Показано первые 10 из {len(appeals)} результатов</i>"
+
+    await message.answer(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+# Экспорт данных
+@router.callback_query(F.data == "admin_export")
+async def export_data(callback: CallbackQuery):
+    """Экспорт всех обращений в текстовый файл"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("📥 Экспортирую данные...")
+
+    text_data = await export_appeals_to_text()
+
+    # Отправка файла
+    from aiogram.types import BufferedInputFile
+    from datetime import datetime
+
+    filename = f"appeals_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    file = BufferedInputFile(text_data.encode('utf-8'), filename=filename)
+
+    await callback.message.answer_document(
+        file,
+        caption="📄 <b>Экспорт обращений</b>\n\nВсе обращения выгружены в файл.",
+        parse_mode="HTML"
+    )
+
+    await callback.message.answer(
+        "✅ Экспорт завершён!",
+        reply_markup=get_admin_back()
+    )
+
+# Обработчик для "пустого" callback (для кнопки с номером страницы)
+@router.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    """Обработчик пустого действия"""
+    await callback.answer()
+
+# Детальный просмотр обращения
+@router.callback_query(F.data.startswith("view_"))
+async def view_appeal_detail(callback: CallbackQuery):
+    """Детальный просмотр обращения"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    appeal_id = int(callback.data.split("_")[1])
+    appeal = await get_appeal(appeal_id)
+
+    if not appeal:
+        await callback.answer("Обращение не найдено", show_alert=True)
+        return
+
+    status = format_status(appeal['status'])
+    date = format_date(appeal['created_at'])
+
+    text = (
+        f"📌 <b>Обращение #{appeal['id']}</b>\n\n"
+        f"👤 <b>От:</b> {appeal['full_name']}\n"
+        f"🆔 <b>User ID:</b> <code>{appeal['user_id']}</code>\n"
+        f"📱 <b>Username:</b> @{appeal['username'] or 'не указан'}\n"
+        f"📅 <b>Дата:</b> {date}\n"
+        f"📊 <b>Статус:</b> {status}\n\n"
+        f"💬 <b>Текст обращения:</b>\n{appeal['message']}\n"
+    )
+
+    if appeal['response']:
+        response_date = format_date(appeal['admin_response_at'])
+        text += (
+            f"\n━━━━━━━━━━━━━━━\n"
+            f"✉️ <b>Ответ администратора:</b>\n{appeal['response']}\n"
+            f"📅 <b>Дата ответа:</b> {response_date}\n"
+        )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_appeal_detail_admin(appeal_id),
+        parse_mode="HTML"
+    )
+    await callback.answer()
