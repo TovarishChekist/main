@@ -11,13 +11,15 @@ from database.db import (
     update_appeal_status, add_admin_response, get_new_appeals,
     get_statistics, get_appeals_by_status, get_all_appeals,
     count_appeals_by_status, count_all_appeals, search_appeals,
-    export_appeals_to_text
+    export_appeals_to_text, delete_appeal, delete_closed_appeals,
+    delete_old_appeals, delete_all_appeals, delete_appeals_by_status
 )
 from bot.keyboards import (
     get_main_menu, get_cancel_keyboard, get_back_to_menu,
     get_appeal_actions, get_status_keyboard, get_admin_menu,
     get_admin_back, get_appeal_detail_admin, get_pagination_keyboard,
-    get_quick_replies, get_search_result_actions
+    get_quick_replies, get_search_result_actions, get_cleanup_menu,
+    get_cleanup_confirm, get_delete_appeal_button
 )
 from bot.config import ADMIN_ID
 
@@ -706,3 +708,245 @@ async def view_appeal_detail(callback: CallbackQuery):
         parse_mode="HTML"
     )
     await callback.answer()
+
+# Функции очистки логов
+
+@router.callback_query(F.data == "admin_cleanup")
+async def show_cleanup_menu(callback: CallbackQuery):
+    """Показать меню очистки логов"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    stats = await get_statistics()
+
+    text = (
+        "🗑️ <b>Очистка логов обращений</b>\n\n"
+        "⚠️ <b>Внимание!</b> Удаление необратимо!\n\n"
+        "📊 <b>Текущее состояние:</b>\n"
+        f"• Всего обращений: {stats['total']}\n"
+        f"• 🆕 Новых: {stats['new']}\n"
+        f"• ⏳ В работе: {stats['in_progress']}\n"
+        f"• ✅ Закрытых: {stats['closed']}\n\n"
+        "Выберите, что удалить:"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_menu(), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "cleanup_closed")
+async def cleanup_closed_confirm(callback: CallbackQuery):
+    """Подтверждение удаления закрытых обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    stats = await get_statistics()
+    closed_count = stats['closed']
+
+    text = (
+        "🗑️ <b>Удаление закрытых обращений</b>\n\n"
+        f"Будет удалено: <code>{closed_count}</code> обращений\n\n"
+        "⚠️ Это действие необратимо!\n\n"
+        "Вы уверены?"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_confirm("closed"), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "cleanup_30days")
+async def cleanup_30days_confirm(callback: CallbackQuery):
+    """Подтверждение удаления обращений старше 30 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    text = (
+        "🗑️ <b>Удаление старых обращений</b>\n\n"
+        "Будут удалены обращения старше <b>30 дней</b>\n\n"
+        "⚠️ Это действие необратимо!\n\n"
+        "Вы уверены?"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_confirm("30days"), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "cleanup_60days")
+async def cleanup_60days_confirm(callback: CallbackQuery):
+    """Подтверждение удаления обращений старше 60 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    text = (
+        "🗑️ <b>Удаление старых обращений</b>\n\n"
+        "Будут удалены обращения старше <b>60 дней</b>\n\n"
+        "⚠️ Это действие необратимо!\n\n"
+        "Вы уверены?"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_confirm("60days"), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "cleanup_90days")
+async def cleanup_90days_confirm(callback: CallbackQuery):
+    """Подтверждение удаления обращений старше 90 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    text = (
+        "🗑️ <b>Удаление старых обращений</b>\n\n"
+        "Будут удалены обращения старше <b>90 дней</b>\n\n"
+        "⚠️ Это действие необратимо!\n\n"
+        "Вы уверены?"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_confirm("90days"), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "cleanup_all")
+async def cleanup_all_confirm(callback: CallbackQuery):
+    """Подтверждение удаления всех обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    stats = await get_statistics()
+    total_count = stats['total']
+
+    text = (
+        "⚠️ <b>УДАЛЕНИЕ ВСЕХ ОБРАЩЕНИЙ</b>\n\n"
+        f"Будет удалено: <code>{total_count}</code> обращений\n\n"
+        "🚨 ЭТО ПОЛНОСТЬЮ ОЧИСТИТ БАЗУ ДАННЫХ!\n"
+        "Все данные будут потеряны навсегда!\n\n"
+        "Вы АБСОЛЮТНО УВЕРЕНЫ?"
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_cleanup_confirm("all"), parse_mode="HTML")
+    await callback.answer()
+
+# Обработчики подтверждённых удалений
+
+@router.callback_query(F.data == "cleanup_confirm_closed")
+async def cleanup_closed_execute(callback: CallbackQuery):
+    """Выполнение удаления закрытых обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("Удаляю закрытые обращения...")
+
+    deleted_count = await delete_closed_appeals()
+
+    text = (
+        "✅ <b>Удаление завершено!</b>\n\n"
+        f"Удалено обращений: <code>{deleted_count}</code>\n\n"
+        "База данных очищена от закрытых обращений."
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+@router.callback_query(F.data == "cleanup_confirm_30days")
+async def cleanup_30days_execute(callback: CallbackQuery):
+    """Выполнение удаления обращений старше 30 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("Удаляю старые обращения...")
+
+    deleted_count = await delete_old_appeals(30)
+
+    text = (
+        "✅ <b>Удаление завершено!</b>\n\n"
+        f"Удалено обращений: <code>{deleted_count}</code>\n\n"
+        "Обращения старше 30 дней удалены."
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+@router.callback_query(F.data == "cleanup_confirm_60days")
+async def cleanup_60days_execute(callback: CallbackQuery):
+    """Выполнение удаления обращений старше 60 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("Удаляю старые обращения...")
+
+    deleted_count = await delete_old_appeals(60)
+
+    text = (
+        "✅ <b>Удаление завершено!</b>\n\n"
+        f"Удалено обращений: <code>{deleted_count}</code>\n\n"
+        "Обращения старше 60 дней удалены."
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+@router.callback_query(F.data == "cleanup_confirm_90days")
+async def cleanup_90days_execute(callback: CallbackQuery):
+    """Выполнение удаления обращений старше 90 дней"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("Удаляю старые обращения...")
+
+    deleted_count = await delete_old_appeals(90)
+
+    text = (
+        "✅ <b>Удаление завершено!</b>\n\n"
+        f"Удалено обращений: <code>{deleted_count}</code>\n\n"
+        "Обращения старше 90 дней удалены."
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+@router.callback_query(F.data == "cleanup_confirm_all")
+async def cleanup_all_execute(callback: CallbackQuery):
+    """Выполнение удаления всех обращений"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    await callback.answer("Удаляю ВСЕ обращения...")
+
+    deleted_count = await delete_all_appeals()
+
+    text = (
+        "✅ <b>База данных полностью очищена!</b>\n\n"
+        f"Удалено обращений: <code>{deleted_count}</code>\n\n"
+        "Все обращения удалены, счётчик ID сброшен."
+    )
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")
+
+# Удаление конкретного обращения
+
+@router.callback_query(F.data.startswith("delete_appeal_"))
+async def delete_specific_appeal(callback: CallbackQuery):
+    """Удаление конкретного обращения"""
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас нет прав администратора", show_alert=True)
+        return
+
+    appeal_id = int(callback.data.split("_")[2])
+
+    success = await delete_appeal(appeal_id)
+
+    if success:
+        text = (
+            f"✅ <b>Обращение #{appeal_id} удалено!</b>\n\n"
+            "Обращение успешно удалено из базы данных."
+        )
+        await callback.answer("Обращение удалено!")
+    else:
+        text = (
+            f"❌ <b>Ошибка удаления</b>\n\n"
+            f"Обращение #{appeal_id} не найдено."
+        )
+        await callback.answer("Обращение не найдено", show_alert=True)
+
+    await callback.message.edit_text(text, reply_markup=get_admin_back(), parse_mode="HTML")

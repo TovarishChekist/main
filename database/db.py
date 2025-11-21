@@ -214,3 +214,55 @@ async def export_appeals_to_text() -> str:
                 text += "-" * 80 + "\n\n"
 
             return text
+
+# Функции удаления обращений
+
+async def delete_appeal(appeal_id: int) -> bool:
+    """Удаление конкретного обращения по ID"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute(
+            """DELETE FROM appeals WHERE id = ?""",
+            (appeal_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+async def delete_closed_appeals() -> int:
+    """Удаление всех закрытых обращений"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute(
+            """DELETE FROM appeals WHERE status = 'closed'"""
+        )
+        await db.commit()
+        return cursor.rowcount
+
+async def delete_old_appeals(days: int) -> int:
+    """Удаление обращений старше указанного количества дней"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute(
+            """DELETE FROM appeals
+               WHERE date(created_at) < date('now', ? || ' days')""",
+            (f'-{days}',)
+        )
+        await db.commit()
+        return cursor.rowcount
+
+async def delete_all_appeals() -> int:
+    """Удаление ВСЕХ обращений (осторожно!)"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute("""DELETE FROM appeals""")
+        await db.commit()
+        # Сброс автоинкремента
+        await db.execute("""DELETE FROM sqlite_sequence WHERE name='appeals'""")
+        await db.commit()
+        return cursor.rowcount
+
+async def delete_appeals_by_status(status: str) -> int:
+    """Удаление обращений по статусу"""
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        cursor = await db.execute(
+            """DELETE FROM appeals WHERE status = ?""",
+            (status,)
+        )
+        await db.commit()
+        return cursor.rowcount
