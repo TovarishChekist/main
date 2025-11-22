@@ -3,14 +3,18 @@ Webhook версия бота для PythonAnywhere и других WSGI хос�
 """
 import asyncio
 import os
+import sys
 import logging
+from dotenv import load_dotenv
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
+# Загрузка переменных окружения
+load_dotenv()
+
 # Импорт обработчиков из основного бота
-import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from bot import dp, bot, TOKEN

@@ -4,9 +4,11 @@
 """
 import asyncio
 import os
+import sys
 import json
 import tempfile
 from typing import Optional
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -17,6 +19,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from crypto_manager import CryptoManager
 from key_manager import KeyManager
 from file_crypto import FileCryptoManager
+
+# Загрузка переменных окружения из .env файла
+load_dotenv()
 
 
 # ============= СОСТОЯНИЯ FSM =============
@@ -38,7 +43,27 @@ class EncryptionStates(StatesGroup):
 
 # ============= КОНФИГУРАЦИЯ =============
 
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN')
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+
+# Валидация токена
+if not TOKEN or TOKEN == 'YOUR_BOT_TOKEN':
+    print("\n" + "="*60)
+    print("❌ ОШИБКА: Токен Telegram бота не установлен!")
+    print("="*60)
+    print("\n📋 Инструкция по настройке:\n")
+    print("1. Создайте .env файл из примера:")
+    print("   cp .env.example .env")
+    print("\n2. Получите токен от @BotFather в Telegram:")
+    print("   - Откройте Telegram и найдите @BotFather")
+    print("   - Отправьте команду /newbot")
+    print("   - Следуйте инструкциям")
+    print("   - Скопируйте токен (выглядит как: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)")
+    print("\n3. Откройте .env файл и вставьте токен:")
+    print("   TELEGRAM_BOT_TOKEN=ваш_токен_здесь")
+    print("\n4. Запустите бота снова")
+    print("\n" + "="*60 + "\n")
+    sys.exit(1)
+
 crypto = CryptoManager()
 key_manager = KeyManager()
 file_crypto = FileCryptoManager()
